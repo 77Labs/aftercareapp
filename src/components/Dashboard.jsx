@@ -7,39 +7,74 @@ function formatDate(iso) {
   })
 }
 
+function RecoveryProgress({ day, total }) {
+  const pct = Math.min(100, Math.round((day / total) * 100))
+  return (
+    <div className="recovery-progress">
+      <div className="recovery-header">
+        <span className="recovery-label">Recovery Progress</span>
+        <span className="recovery-day">Day {day} of {total}</span>
+      </div>
+      <div className="progress-bar">
+        <div className="progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="recovery-pct">{pct}% complete</div>
+    </div>
+  )
+}
+
 function LogItem({ entry }) {
+  const [expanded, setExpanded] = useState(false)
+
   if (entry.type === 'reminder_sent') {
     return (
       <li className="log-item">
         <span className="log-icon">📤</span>
         <div>
-          <div className="log-label">Reminder sent to patient</div>
+          <div className="log-label">Reminder sent — Day {entry.day}</div>
           <div className="log-meta">{formatDate(entry.sentAt)}</div>
         </div>
       </li>
     )
   }
 
-  if (entry.type === 'photo_received') {
+  if (entry.type === 'photo_uploaded') {
     return (
-      <li className="log-item">
+      <li className="log-item log-item--photo">
         <span className="log-icon">📷</span>
-        <div>
-          <div className="log-label">Photo received — forwarded to doctor</div>
-          <div className="log-meta">
-            {formatDate(entry.receivedAt)} &nbsp;·&nbsp; from {entry.from}
-          </div>
-          {entry.body && <div className="log-body">"{entry.body}"</div>}
-          {entry.mediaUrl && (
-            <a
-              href={entry.mediaUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: '0.8rem', color: 'var(--color-primary)' }}
-            >
-              View photo
+        <div style={{ flex: 1 }}>
+          <div className="log-label">Photo uploaded — Day {entry.day} · sent to doctor</div>
+          <div className="log-meta">{formatDate(entry.uploadedAt)}</div>
+          {entry.photoUrl && (
+            <a href={entry.photoUrl} target="_blank" rel="noopener noreferrer" className="photo-thumb-link">
+              <img src={entry.photoUrl} alt={`Day ${entry.day}`} className="photo-thumb" />
             </a>
           )}
+          {entry.note && (
+            <div className="log-note-wrap">
+              <button
+                type="button"
+                className="log-note-toggle"
+                onClick={() => setExpanded(v => !v)}
+              >
+                {expanded ? 'Hide' : 'Show'} AI recovery note
+              </button>
+              {expanded && <p className="log-note">{entry.note}</p>}
+            </div>
+          )}
+        </div>
+      </li>
+    )
+  }
+
+  if (entry.type === 'sms_photo_received') {
+    return (
+      <li className="log-item">
+        <span className="log-icon">💬</span>
+        <div>
+          <div className="log-label">SMS photo received — forwarded to doctor</div>
+          <div className="log-meta">{formatDate(entry.receivedAt)} · from {entry.from}</div>
+          {entry.body && <div className="log-body">"{entry.body}"</div>}
         </div>
       </li>
     )
@@ -57,10 +92,20 @@ export default function Dashboard({ config, onRefresh }) {
     return (
       <div className="empty-state">
         <h2>No active plan</h2>
-        <p>Go to Setup to upload aftercare instructions and configure reminders.</p>
+        <p>Go to Setup to add a procedure and configure reminders.</p>
       </div>
     )
   }
+
+  const day = (() => {
+    const start = new Date(config.procedureDate)
+    start.setHours(0, 0, 0, 0)
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    return Math.max(1, Math.floor((now - start) / 86400000) + 1)
+  })()
+
+  const uploadUrl = `${window.location.origin}/upload?t=${config.uploadToken}`
 
   async function sendNow() {
     setSending(true)
@@ -69,7 +114,7 @@ export default function Dashboard({ config, onRefresh }) {
       const res = await fetch('/api/send-reminder', { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setMsg({ type: 'success', text: 'Reminder sent successfully!' })
+      setMsg({ type: 'success', text: 'Reminder sent!' })
       onRefresh()
     } catch (err) {
       setMsg({ type: 'error', text: err.message })
@@ -98,17 +143,17 @@ export default function Dashboard({ config, onRefresh }) {
   return (
     <div>
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+        <div className="dashboard-top">
           <div>
-            <h2 style={{ fontSize: '1.15rem', marginBottom: '0.2rem' }}>{config.procedureName}</h2>
+            <h2 className="dashboard-title">{config.procedureName}</h2>
+            {config.patientName && <div className="dashboard-patient">{config.patientName}</div>}
             <span className={`badge ${config.active ? 'badge-active' : 'badge-paused'}`}>
               {config.active ? 'Active' : 'Paused'}
             </span>
           </div>
-          <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-            Created {formatDate(config.createdAt)}
-          </span>
         </div>
+
+        <RecoveryProgress day={day} total={config.recoveryDays} />
 
         <div className="summary-grid">
           <div className="summary-item">
@@ -121,38 +166,36 @@ export default function Dashboard({ config, onRefresh }) {
           </div>
           <div className="summary-item">
             <div className="summary-item-label">Reminders</div>
-            <div className="summary-item-value">
-              {config.reminderTimes?.join(' & ')} <span style={{ fontWeight: 400, fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>daily</span>
-            </div>
+            <div className="summary-item-value">{config.reminderTimes?.join(' & ')} daily</div>
           </div>
           <div className="summary-item">
-            <div className="summary-item-label">Timezone</div>
-            <div className="summary-item-value" style={{ fontSize: '0.85rem' }}>{config.timezone}</div>
+            <div className="summary-item-label">Procedure Date</div>
+            <div className="summary-item-value">
+              {new Date(config.procedureDate + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+            </div>
           </div>
         </div>
 
-        <details style={{ marginBottom: '1rem' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '0.85rem', color: 'var(--color-text-secondary)', fontWeight: 600 }}>
-            View Instructions
-          </summary>
-          <pre style={{
-            marginTop: '0.75rem',
-            padding: '0.75rem',
-            background: 'var(--color-surface-alt)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-sm)',
-            fontSize: '0.82rem',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            color: 'var(--color-text-secondary)',
-            maxHeight: '220px',
-            overflowY: 'auto',
-          }}>
-            {config.instructions}
-          </pre>
+        <div className="upload-link-box">
+          <span className="upload-link-label">Patient Photo Upload Link</span>
+          <div className="upload-link-row">
+            <input readOnly value={uploadUrl} className="upload-link-input" onClick={e => e.target.select()} />
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => { navigator.clipboard.writeText(uploadUrl); setMsg({ type: 'success', text: 'Link copied!' }) }}
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+
+        <details>
+          <summary className="instructions-toggle">View Instructions</summary>
+          <pre className="instructions-pre">{config.instructions}</pre>
         </details>
 
-        <div className="dashboard-actions">
+        <div className="dashboard-actions" style={{ marginTop: '1.25rem' }}>
           <button className="btn-success" onClick={sendNow} disabled={sending}>
             {sending ? 'Sending…' : 'Send Reminder Now'}
           </button>
@@ -163,11 +206,17 @@ export default function Dashboard({ config, onRefresh }) {
           >
             {toggling ? '…' : config.active ? 'Pause Reminders' : 'Resume Reminders'}
           </button>
+          <a
+            href="/api/calendar.ics"
+            download
+            className="btn-outline"
+            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+          >
+            Download Calendar
+          </a>
         </div>
 
-        {msg && (
-          <div className={`alert alert-${msg.type}`}>{msg.text}</div>
-        )}
+        {msg && <div className={`alert alert-${msg.type}`}>{msg.text}</div>}
       </div>
 
       <div className="card">

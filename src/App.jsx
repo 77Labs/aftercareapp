@@ -1,7 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import Setup from './components/Setup.jsx'
 import Dashboard from './components/Dashboard.jsx'
+import PatientUpload from './pages/PatientUpload.jsx'
 import './App.css'
+
+function isPatientUploadRoute() {
+  return window.location.pathname === '/upload'
+}
 
 export default function App() {
   const [tab, setTab] = useState('dashboard')
@@ -20,14 +25,10 @@ export default function App() {
     }
   }, [])
 
-  useEffect(() => {
-    fetchConfig()
-  }, [fetchConfig])
+  useEffect(() => { fetchConfig() }, [fetchConfig])
+  useEffect(() => { if (!loading && !config) setTab('setup') }, [loading, config])
 
-  // If no config yet, land on setup
-  useEffect(() => {
-    if (!loading && !config) setTab('setup')
-  }, [loading, config])
+  if (isPatientUploadRoute()) return <PatientUpload />
 
   return (
     <div className="app">
@@ -60,10 +61,7 @@ export default function App() {
         ) : tab === 'setup' ? (
           <Setup
             existing={config}
-            onSaved={(cfg) => {
-              setConfig(cfg)
-              setTab('dashboard')
-            }}
+            onSaved={(cfg) => { setConfig(cfg); setTab('dashboard') }}
           />
         ) : (
           <Dashboard config={config} onRefresh={fetchConfig} />
